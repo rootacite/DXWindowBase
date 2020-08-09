@@ -17,6 +17,8 @@ using System.Diagnostics;
 
 using D2DBitmap = SharpDX.Direct2D1.Bitmap1;
 using Size = System.Drawing.Size;
+using System.Threading.Tasks;
+using SharpDX.Mathematics.Interop;
 
 namespace D2D
 {
@@ -102,7 +104,7 @@ namespace D2D
                 }
                 if (result == DrawResult.Commit)
                 {
-                        m_info.swapChain.Present(1, PresentFlags.None);
+                        m_info.swapChain.Present(0, PresentFlags.None);
                 }
                 timer.Stop();
                 decimal time = timer.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000;
@@ -133,8 +135,8 @@ namespace D2D
             result.swapChainDesc = new SwapChainDescription1();
 
 
-            result.swapChainDesc.Width = 0;                           // use automatic sizing
-            result.swapChainDesc.Height = 0;
+            result.swapChainDesc.Width = size.Width;                           // use automatic sizing
+            result.swapChainDesc.Height = size.Height;
             result.swapChainDesc.Format = Format.B8G8R8A8_UNorm; // this is the most common swapchain format
             result.swapChainDesc.Stereo = false;
             result.swapChainDesc.SampleDescription = new SampleDescription()
@@ -146,10 +148,27 @@ namespace D2D
             result.swapChainDesc.BufferCount = 2;                     // use double buffering to enable flip
             result.swapChainDesc.Scaling = Scaling.None;
             result.swapChainDesc.SwapEffect = SwapEffect.FlipSequential; // all apps must use this SwapEffect
-            result.swapChainDesc.Flags = 0;
+            result.swapChainDesc.Flags = SwapChainFlags.AllowModeSwitch;
             var vb_ns = result.dxgiDevice.GetParent<Adapter>().GetParent<SharpDX.DXGI.Factory2>();
             result.swapChain = new SwapChain1(vb_ns, result.d3DDevice, handle, ref result.swapChainDesc);
+            RawBool isFulls;
+            Output opt;
+            result.swapChain.GetFullscreenState(out isFulls, out opt);
+            if (!isfullwindow && !isFulls)
+            {
+                ModeDescription res = new ModeDescription();
+                res.Format = Format.B8G8R8A8_UNorm;
+                res.Height = size.Height;
+                res.Width = size.Width;
+                res.Scaling = DisplayModeScaling.Stretched;
+                res.RefreshRate = Rational.Empty;
+                res.ScanlineOrdering = DisplayModeScanlineOrder.LowerFieldFirst;
 
+                result.swapChain.ResizeTarget(ref res);
+            
+                result.swapChain.SetFullscreenState(!isfullwindow, opt);
+                result.swapChain.ResizeBuffers(2, size.Width,size.Height,Format.B8G8R8A8_UNorm, SwapChainFlags.AllowModeSwitch);
+            }
             result.backbuffer = Surface.FromSwapChain(result.swapChain, 0);
 
             result._bufferBack = new D2DBitmap(result.View, result.backbuffer);
@@ -181,6 +200,14 @@ namespace D2D
         Direct2DInformation m_info;
         #endregion
 
+        async public Task EndDrawProcess()
+        {
+            await Task.Factory.StartNew(e => {
+                this.m_draw_thread.Abort();
+                this.m_draw_thread.Join();
+            }, null);
+        }
+
         #region Dispose
         private bool disposedValue;
 
@@ -192,7 +219,6 @@ namespace D2D
                 {
                     // TODO: 释放托管状态(托管对象)
                 }
-                m_draw_thread.Abort();
                 D2dRelease(m_info);
                 timeEndPeriod(1);
                 // TODO: 释放未托管的资源(未托管的对象)并替代终结器

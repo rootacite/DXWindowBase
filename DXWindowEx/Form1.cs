@@ -19,7 +19,7 @@ namespace DXWindowEx
 
             float a = 0, b = 1;
             bool res = false;
-            var DX = new Direct2DWindow(new Size(1280, 720),  this.Handle);
+            var DX = new Direct2DWindow(new Size(1280, 720),  this.Handle,true);
             DX.Frames = 60;
             DX.DrawProc += (dc, pw) =>
             {
