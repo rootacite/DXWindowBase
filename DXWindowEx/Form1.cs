@@ -24,12 +24,23 @@ namespace DXWindowEx
             float a = 0, b = 1;
             bool res = false;
             var DX = new Direct2DWindow(new Size(1280, 720),  this.Handle,false);
+            double rate = 0.5;
             this.KeyPress += (e, v) =>
             {
-                image.Opacity = 0.7f;
-                image.Position = new Point(300, 300);
+                //    image.Opacity = 0.7f;
+                //    image.Position = new Point(50, 50);
+                //  image.Size = new SharpDX.Size2(100, 100);
+                //    image.Orientation = Math.PI * rate;
+                //    image.Saturation = 1f;
+                if (v.KeyChar == 'a')
+                    rate += 0.01;
+                if (v.KeyChar == 'd')
+                    rate -= 0.01;
+                image.Brightness = (float)rate;
+                
+                this.Text = DX.FrameRate.ToString();
             };
-            DX.Frames = 60;
+            DX.AskedFrames = 60;
             DX.DrawProc += (dc, pw) =>
             {
               

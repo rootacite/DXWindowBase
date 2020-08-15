@@ -31,7 +31,33 @@ namespace D2D
 {
     public class RenderableImage : IDrawable, IDisposable
     {
+        static private RawMatrix3x2 BuildOrientationMatrix(double Radian)
+        {
+            var result = new RawMatrix3x2((float)Math.Cos(Radian), (float)Math.Sin(Radian), (float)-Math.Sin(Radian), (float)Math.Cos(Radian), 0f, 0f);
+            return result;
+        }
+        static private RawMatrix3x2 MatrixMultiplication(RawMatrix3x2 x1, RawMatrix3x2 x2)
+        {
+            var result = new RawMatrix3x2(x1.M11 * x2.M11 + x1.M21 + x2.M12, x1.M11 * x2.M21 + x1.M21 * x2.M22, x1.M12 * x2.M11 + x1.M22 * x2.M12, x1.M12 * x2.M21 + x1.M22 * x2.M22, 0f, 0f);
+            return result;
+        }
+
+        public float Saturation { get; set; }= 1f;
+        public float Brightness { get; set; } = 0.5f;
+        public double Orientation { get; set; } = 0;
         private Size2 _Size;
+        public Size2 Size
+        {
+            get
+            {
+                return _Size;
+            }
+            set
+            {
+                _Size = new Size2(value.Width, value.Height);
+            }
+        }
+
         private Point _Position = new Point(0, 0);
         public Point Position
         {
@@ -42,41 +68,63 @@ namespace D2D
             set
             {
                 _Position = new Point(value.X, value.Y);
-                if (!this.reltOutput.IsDisposed) this.reltOutput.Dispose();
-                this.reltOutput = Output(rDc);
             }
         }
-        private float _Opacity = 1.0f;
-        public float Opacity 
+
+        public float Opacity { get; set; } = 1.0f;
+
+        private Image Output
         {
             get
             {
-                return _Opacity;
+                var blEf = new SharpDX.Direct2D1.Effect(rDc, Effect.Opacity);
+
+                blEf.SetInput(0, image, new RawBool());
+                blEf.SetValue(0, Opacity);
+
+                var result1 = blEf.Output;
+                blEf.Dispose();
+
+                var tfEf = new SharpDX.Direct2D1.Effects.AffineTransform2D(rDc);
+                tfEf.SetInput(0, result1, new RawBool());
+
+                result1.Dispose();
+                var x_rate = _Size.Width / (double)image.PixelSize.Width;
+                var y_rate = _Size.Height / (double)image.PixelSize.Height;
+                tfEf.TransformMatrix = new RawMatrix3x2((float)x_rate, 0f, 0f, (float)y_rate, 0f, 0f);
+                result1 = tfEf.Output;
+                tfEf.Dispose();
+                
+                var tfEf1 = new SharpDX.Direct2D1.Effects.AffineTransform2D(rDc);
+                tfEf1.SetInput(0, result1, new RawBool());
+
+                result1.Dispose();
+                tfEf1.TransformMatrix = BuildOrientationMatrix(Orientation);
+                result1 = tfEf1.Output;
+                tfEf1.Dispose();
+
+                var stEf = new SharpDX.Direct2D1.Effects.Saturation(rDc);
+                stEf.SetInput(0, result1, new RawBool());
+
+                result1.Dispose();
+                stEf.Value = Saturation;
+                result1 = stEf.Output;
+                stEf.Dispose();
+
+                var btEf = new SharpDX.Direct2D1.Effects.Brightness(rDc);
+                btEf.SetInput(0, result1, new RawBool());
+
+                result1.Dispose();
+                btEf.BlackPoint = new RawVector2(1.0f - Brightness, Brightness);
+              //  btEf.WhitePoint =;
+                result1 = btEf.Output;
+                btEf.Dispose();
+
+                return result1;
             }
-
-            set
-            {
-                _Opacity = value;
-                if (!this.reltOutput.IsDisposed) this.reltOutput.Dispose();
-                this.reltOutput = Output(rDc);
-            }
-        }
-
-        private Image Output(DeviceContext dc)
-        {
-            var blEf = new SharpDX.Direct2D1.Effect(dc, Effect.Opacity);
-
-            blEf.SetInput(0, image, new RawBool());
-            blEf.SetValue(0, _Opacity);
-
-            var result1 = blEf.Output;
-            blEf.Dispose();
-
-            return result1;
         }
 
         private D2DBitmap image = null;
-        private Image reltOutput = null;
 
         private DeviceContext rDc = null;
         private bool disposedValue;
@@ -86,7 +134,6 @@ namespace D2D
             RenderableImage rt = new RenderableImage();
 
             rt.image = D2DBitmap.FromWicBitmap(dc, im);
-            rt.reltOutput = D2DBitmap.FromWicBitmap(dc, im);
             rt.rDc = dc;
             rt._Size = new Size2(rt.image.PixelSize.Width, rt.image.PixelSize.Height);
 
@@ -96,11 +143,14 @@ namespace D2D
 
         public void Render()
         {
-            rDc.DrawImage(reltOutput, null, new RawRectangleF(Position.X, Position.Y, Position.X + _Size.Width, Position.Y + _Size.Height), SharpDX.Direct2D1.InterpolationMode.Linear, CompositeMode.BoundedSourceCopy);
+            using (var fLpt= Output)
+                rDc.DrawImage(fLpt, new RawVector2(_Position.X, _Position.Y), null, SharpDX.Direct2D1.InterpolationMode.Linear, CompositeMode.SourceOver);
+            
         }
         public void Render(DeviceContext dc)
         {
-            dc.DrawImage(reltOutput, null, new RawRectangleF(Position.X, Position.Y, Position.X + _Size.Width, Position.Y + _Size.Height), SharpDX.Direct2D1.InterpolationMode.Linear, CompositeMode.BoundedSourceCopy);
+            using (var fLpt = Output)
+                dc.DrawImage(fLpt, new RawVector2(_Position.X, _Position.Y), null, SharpDX.Direct2D1.InterpolationMode.Linear, CompositeMode.SourceOver);
         }
 
         public void Update()
@@ -120,7 +170,6 @@ namespace D2D
                 // TODO: 释放未托管的资源(未托管的对象)并替代终结器
                 // TODO: 将大型字段设置为 null
                 this.image.Dispose();
-                if(!this.reltOutput.IsDisposed) this.reltOutput.Dispose();
                 disposedValue = true;
             }
         }
@@ -246,27 +295,24 @@ namespace D2D
         }
         private Thread m_draw_thread = null;
         private Stopwatch timer = new Stopwatch();
-        private int _Frames = 60;
-        public int Frames
-        {
-            get
-            {
-                return _Frames;
-            }
-            set
-            {
-                _Frames = value;
-            }
-        }
 
+        public int AskedFrames { get; set; } = 60;
+        public int FrameRate
+        {
+            get;
+            private set;
+        }
         public void Commit()
         {
             m_info.swapChain.Present(1, PresentFlags.None);
         }
         private void DrawingEvent()
         {
+            Stopwatch sys_watch = new Stopwatch();
             while (true)
             {
+                sys_watch.Start();
+
                 timer.Start();
                 m_info.View.BeginDraw();
                 var result = DrawProc?.Invoke(m_info.View, n_size);
@@ -282,12 +328,18 @@ namespace D2D
                 }
                 timer.Stop();
                 decimal time = timer.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000;
-                decimal wait_time = 1000.0M / (decimal)Frames - time;
+                decimal wait_time = 1000.0M / (decimal)AskedFrames - time;
 
                 timer.Reset();
                 //    _renderForm.Text = time.ToString();
                 if (wait_time <= 0) wait_time = 0;
                 Thread.Sleep((int)wait_time);
+
+                sys_watch.Stop();
+                
+                decimal stime = sys_watch.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000;
+                FrameRate = (int)(1000.0M / stime);
+                sys_watch.Reset();
             }
         }
         #region dxrender
