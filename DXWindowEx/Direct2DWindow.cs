@@ -26,9 +26,65 @@ using SharpDX.Direct2D1.Effects;
 using Blend = SharpDX.Direct2D1.Effects.Blend;
 using Image = SharpDX.Direct2D1.Image;
 using SharpDX;
+using System.Collections.Generic;
 
 namespace D2D
 {
+
+    public class InteractiveObject : RenderableImage ,IDisposable
+    {
+       
+        static private List<InteractiveObject> listOfExist = new List<InteractiveObject>();
+        public Rectangle CollisionRange
+        {
+            get
+            {
+                var result = new Rectangle();
+
+                result.X = Position.X;
+                result.Y = Position.Y;
+                result.Width = Size.Width;
+                result.Height = Size.Height;
+
+                return result;
+            }
+        }
+        public InteractiveObject(DeviceContext dc, WICBitmap wic) : base(dc, wic)
+        {
+            listOfExist.Add(this);
+        }
+
+        public void Move(int vx,int vy)
+        {
+            var new_pos = new Point(Position.X + vx, Position.Y + vy);
+
+            var new_rect = new Rectangle()
+            {
+                X = new_pos.X,
+                Y = new_pos.Y,
+                Width = Size.Width,
+                Height = Size.Height
+            };
+
+            foreach (var i in listOfExist)
+            {
+                if (i == this)
+                    continue;
+                if (new_rect.IntersectsWith(i.CollisionRange))
+                    return;
+            }
+
+            Position = new_pos;
+        }
+
+        new public void Dispose()
+        {
+            base.Dispose();
+            listOfExist.Remove(this);
+        }
+
+        new public double Orientation { get; }
+    }
     public class RenderableImage : IDrawable, IDisposable
     {
         static private RawMatrix3x2 BuildOrientationMatrix(double Radian)
@@ -50,7 +106,7 @@ namespace D2D
         {
             get
             {
-                return _Size;
+                return new Size2(_Size.Width, _Size.Height);
             }
             set
             {
@@ -63,7 +119,7 @@ namespace D2D
         {
             get
             {
-                return _Position;
+                return new Point(_Position.X, _Position.Y);
             }
             set
             {
@@ -128,18 +184,28 @@ namespace D2D
 
         private DeviceContext rDc = null;
         private bool disposedValue;
+        public bool IsDisposed
+        {
+            get
+            {
+                return disposedValue;
+            }
+        }
 
         static public RenderableImage CreateFromWIC(DeviceContext dc,WICBitmap im)
         {
-            RenderableImage rt = new RenderableImage();
+            RenderableImage rt = new RenderableImage(dc,im);
 
-            rt.image = D2DBitmap.FromWicBitmap(dc, im);
-            rt.rDc = dc;
-            rt._Size = new Size2(rt.image.PixelSize.Width, rt.image.PixelSize.Height);
+           
 
             return rt;
         }
-
+        protected RenderableImage(DeviceContext dc, WICBitmap im)
+        {
+            this.image = D2DBitmap.FromWicBitmap(dc, im);
+            this.rDc = dc;
+            this._Size = new Size2(this.image.PixelSize.Width, this.image.PixelSize.Height);
+        }
 
         public void Render()
         {
@@ -162,6 +228,8 @@ namespace D2D
         {
             if (!disposedValue)
             {
+
+                disposedValue = true;
                 if (disposing)
                 {
                     // TODO: 释放托管状态(托管对象)
@@ -170,7 +238,6 @@ namespace D2D
                 // TODO: 释放未托管的资源(未托管的对象)并替代终结器
                 // TODO: 将大型字段设置为 null
                 this.image.Dispose();
-                disposedValue = true;
             }
         }
 
@@ -255,6 +322,13 @@ namespace D2D
     class Direct2DWindow : IDisposable
     {
         //tools
+        public DeviceContext DC
+        {
+            get
+            {
+                return m_info.View;
+            }
+        }
 
         public RenderableImage CreateImage(string path)
         {

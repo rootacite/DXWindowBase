@@ -16,7 +16,8 @@ namespace DXWindowEx
     public partial class Form1 : Form
     {
         ClosedGemo gemo = new ClosedGemo(new Point[] { new Point(500,500),new Point(800,600),new Point(800,200), new Point(500, 200) }, new SharpDX.Mathematics.Interop.RawColor4(1, 0, 0, 1), new SharpDX.Mathematics.Interop.RawColor4(1, 1, 1, 1));
-        RenderableImage image = null;
+        InteractiveObject obj = null;
+        InteractiveObject obj2 = null;
         public Form1()
         {
             InitializeComponent();
@@ -33,11 +34,22 @@ namespace DXWindowEx
                 //    image.Orientation = Math.PI * rate;
                 //    image.Saturation = 1f;
                 if (v.KeyChar == 'a')
-                    rate += 0.01;
+                    obj.Move(-2, 0);
                 if (v.KeyChar == 'd')
-                    rate -= 0.01;
-                image.Brightness = (float)rate;
-                
+                    obj.Move(2, 0);
+                if (v.KeyChar == 'w')
+                    obj.Move(0, -2);
+                if (v.KeyChar == 's')
+                    obj.Move(0, 2);
+
+                if (v.KeyChar == '-')
+                    obj.Opacity -= 0.05f;
+                if (v.KeyChar == '=')
+                    obj.Opacity += 0.05f ;
+
+                if (v.KeyChar == ' ')
+                    obj2.Dispose();
+
                 this.Text = DX.FrameRate.ToString();
             };
             DX.AskedFrames = 60;
@@ -68,11 +80,24 @@ namespace DXWindowEx
             draw:
                 dc.Clear(new SharpDX.Mathematics.Interop.RawColor4(a, 1, b, 1));
 
-                gemo.Render(dc);
-                image.Render();
+                obj.Render();
+               if(!obj2.IsDisposed) obj2.Render();
                 return DrawResult.Commit;
             };
-            image = DX.CreateImage(@"C:\Users\14980\Desktop\test.jpg");
+            using (var im = Direct2DHelper.LoadBitmap(@"E:\note\Untitled.png"))
+                obj = new InteractiveObject(DX.DC, im);
+            var sz = obj.Size;
+            sz.Width /= 3;
+            sz.Height /= 3;
+            obj.Size = sz;
+
+
+            using (var im = Direct2DHelper.LoadBitmap(@"C:\Users\14980\Desktop\devicecontextdiagram.png"))
+                obj2 = new InteractiveObject(DX.DC, im)
+                {
+                    Position = new Point(600, 300),
+                    Size = new SharpDX.Size2(200, 200)
+                };
             DX.Run();
             this.Paint += (e, v) =>
             {
