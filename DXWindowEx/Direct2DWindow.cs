@@ -24,16 +24,36 @@ using WICBitmap = SharpDX.WIC.Bitmap;
 
 using SharpDX.Direct2D1.Effects;
 using Blend = SharpDX.Direct2D1.Effects.Blend;
-using Image = SharpDX.Direct2D1.Image;
 using SharpDX;
 using System.Collections.Generic;
+using System.Windows;
+using Point = System.Drawing.Point;
+using PixelFormat = SharpDX.Direct2D1.PixelFormat;
+using AlphaMode = SharpDX.Direct2D1.AlphaMode;
+using System.Windows.Media.Imaging;
+using BitmapDecoder = SharpDX.WIC.BitmapDecoder;
+using System.Windows.Threading;
+using System.Windows.Forms;
 
 namespace D2D
 {
-
     public class InteractiveObject : RenderableImage ,IDisposable
     {
-       
+
+        private List<Vector> Forces = new List<Vector>();
+        private Vector Acceleration
+        {
+            get
+            {
+                return new Vector();
+            }
+        }
+        private Vector Velocity = new Vector(0, 0);
+
+
+        //************************
+
+        private D2DBitmap[] characters = null;
         static private List<InteractiveObject> listOfExist = new List<InteractiveObject>();
         public Rectangle CollisionRange
         {
@@ -52,11 +72,38 @@ namespace D2D
         public InteractiveObject(DeviceContext dc, WICBitmap wic) : base(dc, wic)
         {
             listOfExist.Add(this);
+            characters = new D2DBitmap[] { D2DBitmap.FromWicBitmap(dc, wic) };
         }
-
-        public void Move(int vx,int vy)
+        public InteractiveObject(DeviceContext dc, WICBitmap[] wic) : base(dc, wic[0])
         {
-            var new_pos = new Point(Position.X + vx, Position.Y + vy);
+            var ims = new List<D2DBitmap>();
+
+            foreach(var i in wic)
+            {
+                ims.Add(D2DBitmap.FromWicBitmap(dc, i));
+            }
+
+            characters = ims.ToArray();
+            listOfExist.Add(this);
+        }
+        public delegate bool CollisionEvent(InteractiveObject obj, double ort);
+        public bool HasCollision { get; set; } = true;
+        public event CollisionEvent Collision;
+
+        public void Move(Vector vt)
+        {
+            var new_pos = new Point((int)(Position.X + vt.X), (int)(Position.Y + vt.Y));
+            double vtr;
+            if (Math.Abs( vt.Y) > Math.Abs( vt.X))
+                vtr = Math.Asin(-vt.Y / Math.Sqrt(vt.X * vt.X + vt.Y * vt.Y));
+            else
+                vtr = Math.Acos(vt.X / Math.Sqrt(vt.X * vt.X + vt.Y * vt.Y));
+            if (vtr < 0)
+                vtr += 2d * Math.PI;
+            if (vtr < Math.PI)
+                vtr += Math.PI;
+            else
+                vtr -= Math.PI;
 
             var new_rect = new Rectangle()
             {
@@ -70,17 +117,42 @@ namespace D2D
             {
                 if (i == this)
                     continue;
-                if (new_rect.IntersectsWith(i.CollisionRange))
-                    return;
+                if (new_rect.IntersectsWith(i.CollisionRange) && HasCollision)
+                {
+                    if (Collision?.Invoke(i, vtr) == true)
+                        return;
+                }
             }
 
             Position = new_pos;
         }
-
+        public void NextCharacter()
+        {
+            bool found = false;
+            foreach (var i in characters)
+            {
+                if (found)
+                {
+                    _Pelete = i;
+                    return;
+                }
+                if (i == _Pelete)
+                {
+                    found = true;
+                    continue;
+                }
+            }
+            _Pelete = characters[0];
+        }
         new public void Dispose()
         {
             base.Dispose();
             listOfExist.Remove(this);
+
+            foreach(var i in characters)
+            {
+                i.Dispose();
+            }
         }
 
         new public double Orientation { get; }
@@ -129,13 +201,13 @@ namespace D2D
 
         public float Opacity { get; set; } = 1.0f;
 
-        private Image Output
+        private SharpDX.Direct2D1.Image Output
         {
             get
             {
                 var blEf = new SharpDX.Direct2D1.Effect(rDc, Effect.Opacity);
 
-                blEf.SetInput(0, image, new RawBool());
+                blEf.SetInput(0, _Pelete, new RawBool());
                 blEf.SetValue(0, Opacity);
 
                 var result1 = blEf.Output;
@@ -145,8 +217,8 @@ namespace D2D
                 tfEf.SetInput(0, result1, new RawBool());
 
                 result1.Dispose();
-                var x_rate = _Size.Width / (double)image.PixelSize.Width;
-                var y_rate = _Size.Height / (double)image.PixelSize.Height;
+                var x_rate = _Size.Width / (double)_Pelete.PixelSize.Width;
+                var y_rate = _Size.Height / (double)_Pelete.PixelSize.Height;
                 tfEf.TransformMatrix = new RawMatrix3x2((float)x_rate, 0f, 0f, (float)y_rate, 0f, 0f);
                 result1 = tfEf.Output;
                 tfEf.Dispose();
@@ -179,8 +251,8 @@ namespace D2D
                 return result1;
             }
         }
-
-        private D2DBitmap image = null;
+        private D2DBitmap pel_origin = null;
+        protected D2DBitmap _Pelete = null;
 
         private DeviceContext rDc = null;
         private bool disposedValue;
@@ -202,9 +274,11 @@ namespace D2D
         }
         protected RenderableImage(DeviceContext dc, WICBitmap im)
         {
-            this.image = D2DBitmap.FromWicBitmap(dc, im);
-            this.rDc = dc;
-            this._Size = new Size2(this.image.PixelSize.Width, this.image.PixelSize.Height);
+           
+            this._Pelete = D2DBitmap.FromWicBitmap(dc, im);
+            pel_origin = _Pelete;
+           this.rDc = dc;
+            this._Size = new Size2(this._Pelete.PixelSize.Width, this._Pelete.PixelSize.Height);
         }
 
         public void Render()
@@ -237,7 +311,7 @@ namespace D2D
 
                 // TODO: 释放未托管的资源(未托管的对象)并替代终结器
                 // TODO: 将大型字段设置为 null
-                this.image.Dispose();
+                this.pel_origin.Dispose();
             }
         }
 
@@ -298,7 +372,7 @@ namespace D2D
             throw new NotImplementedException();
         }
     }
-    public struct Direct2DInformation
+    public struct Direct2DInformationW
     {
         public ImagingFactory ImagingFacy;
         public D2DFactory D2DFacy;
@@ -313,7 +387,7 @@ namespace D2D
         public DeviceContext View { get; set; }//绘图目标
 
     }
-    enum DrawResult
+    enum DrawResultW
     {
         Commit,
         Death,
@@ -347,7 +421,7 @@ namespace D2D
         static extern void timeEndPeriod(int t);
         bool _isfullwindow;
         private Size n_size;
-        public delegate DrawResult _DrawProc(DeviceContext dc, Size size);
+        public delegate DrawResultW _DrawProc(DeviceContext dc, Size size);
         public event _DrawProc DrawProc;
 
         public IntPtr Handle { get; private set; } = (IntPtr)0;
@@ -391,12 +465,12 @@ namespace D2D
                 m_info.View.BeginDraw();
                 var result = DrawProc?.Invoke(m_info.View, n_size);
                 m_info.View.EndDraw();
-                if (result == DrawResult.Death)
+                if (result == DrawResultW.Death)
                 {
                     Dispose();
                     return;
                 }
-                if (result == DrawResult.Commit)
+                if (result == DrawResultW.Commit)
                 {
                         m_info.swapChain.Present(0, PresentFlags.None);
                 }
@@ -417,9 +491,9 @@ namespace D2D
             }
         }
         #region dxrender
-        static public Direct2DInformation D2dInit(Size size, IntPtr handle, bool isfullwindow)
+        static public Direct2DInformationW D2dInit(Size size, IntPtr handle, bool isfullwindow)
         {
-            Direct2DInformation result = new Direct2DInformation();
+            Direct2DInformationW result = new Direct2DInformationW();
 
             result.d3DDevice = new SharpDX.Direct3D11.Device(DriverType.Hardware, DeviceCreationFlags.BgraSupport);
             var __dxgiDevice = result.d3DDevice.QueryInterface<Device>();
@@ -480,7 +554,7 @@ namespace D2D
 
             return result;
         }
-        static public void D2dRelease(Direct2DInformation info)
+        static public void D2dRelease(Direct2DInformationW info)
         {
             info._bufferBack?.Dispose();
             info.View?.Dispose();
@@ -497,7 +571,7 @@ namespace D2D
             info.swapChain.Dispose();
         }
 
-        Direct2DInformation m_info;
+        Direct2DInformationW m_info;
         #endregion
 
         async public Task EndDrawProcess()
@@ -563,5 +637,264 @@ namespace D2D
           
             return Init_action;
         }
+    }
+
+    public enum DrawProcResult
+    {
+        Normal,
+        Ignore,
+        Death
+    }
+
+    public delegate void StartTask(Direct2DInformation view, WICBitmap last, int Width, int Height);
+    public delegate void EndedTask();
+    public delegate void EndingTask(object Loadedsouce, Direct2DImage self);
+    public delegate DrawProcResult DrawProcTask(Direct2DInformation view, object Loadedsouce, int Width, int Height);
+
+    public struct Direct2DInformation
+    {
+        public ImagingFactory ImagingFacy;
+        public D2DFactory D2DFacy;
+        public D2DBitmap _bufferBack;//用于D2D绘图的WIC图片
+        public SharpDX.Direct3D11.Device d3DDevice;// = new SharpDX.Direct3D11.Device(DriverType.Hardware, DeviceCreationFlags.BgraSupport);
+        public SharpDX.DXGI.Device dxgiDevice;// = d3DDevice.QueryInterface<Device>().QueryInterface<SharpDX.DXGI.Device>();
+
+        public SharpDX.Direct2D1.Device d2DDevice;
+
+        public DeviceContext View { get; set; }//绘图目标
+
+    }
+    sealed public class Direct2DImage : IDisposable
+    {
+
+        public object Loadedsouce = null;
+        [DllImport("Kernel32.dll")]
+        unsafe extern public static void RtlMoveMemory(void* dst, void* sur, long size);
+
+        private int Times = 0;//每画一帧，值自增1，计算帧率时归零
+        public int Dpis { get; private set; } = 0;//表示当前的帧率
+        public int Width { get; }//绘图区域的宽
+        public int Height { get; }//绘图区域的长
+
+        public int TargetDpi;//目标帧率
+
+        private WriteableBitmap buffer = null;//图片源
+
+
+
+        public double Speed = 0;//画每帧后等待的时间
+        private DispatcherTimer m_Dipter;//计算帧率的计时器
+        private Thread m_Dipter2;//绘图线程
+
+
+        public event EndedTask Disposed;
+        public event EndingTask Disposing;
+
+        public event DrawProcTask DrawProc;
+        public event StartTask FirstDraw;
+
+        private bool isRunning = false;//指示是否正在运行
+
+        static public Direct2DInformation D2dInit(Size2 size)
+        {
+            Direct2DInformation result = new Direct2DInformation();
+
+            result.d3DDevice = new SharpDX.Direct3D11.Device(DriverType.Hardware, DeviceCreationFlags.BgraSupport);
+            var __dxgiDevice = result.d3DDevice.QueryInterface<Device>();
+            result.dxgiDevice = __dxgiDevice.QueryInterface<SharpDX.DXGI.Device>();
+            __dxgiDevice.Dispose();
+
+            result.D2DFacy = new D2DFactory();
+            result.d2DDevice = new SharpDX.Direct2D1.Device(result.D2DFacy, result.dxgiDevice);
+
+            result.View = new DeviceContext(result.d2DDevice, DeviceContextOptions.EnableMultithreadedOptimizations);
+            result.ImagingFacy = new ImagingFactory();
+            result._bufferBack = new D2DBitmap(result.View, size,
+                new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, AlphaMode.Premultiplied), 72, 72, BitmapOptions.Target | BitmapOptions.CannotDraw));
+            result.View.Target = result._bufferBack;
+
+            return result;
+        }
+
+        static public void D2dRelease(Direct2DInformation info)
+        {
+            info._bufferBack?.Dispose();
+            info.View?.Dispose();
+
+            info.ImagingFacy?.Dispose();
+
+
+            info.d2DDevice?.Dispose();
+            info.D2DFacy?.Dispose();
+            info.dxgiDevice?.Dispose();
+            info.d3DDevice?.Dispose();
+        }
+        public Direct2DInformation m_d2d_info;
+        public Direct2DImage(Size2 size, int Fps)
+        {
+            TargetDpi = Fps;
+
+            Speed = 1.0d / TargetDpi;
+            Width = size.Width;
+            Height = size.Height;
+            isRunning = true;
+
+
+
+            m_d2d_info = D2dInit(size);
+
+            buffer = new WriteableBitmap(size.Width, size.Height, 72, 72, System.Windows.Media.PixelFormats.Pbgra32, null);
+
+        }/*
+        public void DrawStartup(System.Windows.Controls.Image contorl)
+        {
+            if (FirstDraw != null)
+            {
+                try
+                {
+                    FirstDraw(m_d2d_info, null, Width, Height);
+                    contorl.Dispatcher.Invoke(new Action(() => { Commit(); }));
+                }
+                catch (Exception e)
+                {
+                    MessageBox.Show(e.ToString());
+                }
+
+            }
+
+            m_Dipter = new DispatcherTimer() { Interval = TimeSpan.FromSeconds(1) };
+            m_Dipter.Tick += (e, v) =>
+            {
+
+                Dpis = Times;
+                Debug.WriteLine("Speed:" + Dpis.ToString());
+
+                Times = 0;
+            };
+            m_Dipter2 = new Thread(() =>
+            {//绘图代码
+
+                while (isRunning)
+                {
+
+
+                    DrawProcResult? UpData = null;
+                    Stopwatch sw = new Stopwatch();
+                    sw.Start();
+
+                    UpData = DrawProc?.Invoke(m_d2d_info, Loadedsouce, Width, Height);
+                    if (!(UpData == DrawProcResult.Ignore || UpData == null)) contorl.Dispatcher.Invoke(new Action(() => { Commit(); }));
+
+                    sw.Stop();
+
+                    decimal time = sw.ElapsedTicks / (decimal)Stopwatch.Frequency * 1000;
+                    decimal wait_time = 1000.0M / (decimal)TargetDpi - time;
+
+                    if (wait_time < 0)
+                    {
+                        wait_time = 0;
+                    }
+
+                    if (UpData == DrawProcResult.Normal || UpData == null)
+                    {
+                        Thread.Sleep((int)wait_time);
+                        Times++;
+                        continue;
+                    }
+                    if (UpData == DrawProcResult.Ignore)
+                    {
+                        continue;
+                    }
+                    if (UpData == DrawProcResult.Death)
+                    {
+                        this.Dispose();
+                        break;
+                    }
+
+                }
+
+                Disposing?.Invoke(Loadedsouce, this);
+
+                buffer = null;
+
+                //////
+                D2dRelease(m_d2d_info);
+                Disposed?.Invoke();
+            })
+            { IsBackground = true };
+
+            contorl.Source = buffer;
+
+            m_Dipter.Start();
+            m_Dipter2.Start();
+        }
+        */
+        public void Dispose()
+        {
+            Dispose(true);
+
+            GC.SuppressFinalize(this);
+
+        }
+        private void Dispose(bool isdisposing)
+        {
+            if (IsDisposed) return;
+            IsDisposed = true;
+            m_Dipter?.Stop();
+
+
+            if (isdisposing)
+            {
+
+            }
+
+            isRunning = false;
+        }
+        public bool IsDisposed { get; private set; } = false;
+        public WICBitmap LastDraw
+        {
+            get
+            {
+                D2DBitmap m_local_buffer = new D2DBitmap(m_d2d_info.View, new Size2(Width, Height),
+            new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, AlphaMode.Premultiplied), 72, 72, BitmapOptions.CannotDraw | BitmapOptions.CpuRead));
+
+                m_local_buffer.CopyFromBitmap(m_d2d_info._bufferBack);
+                var m_end_map = m_local_buffer.Map(MapOptions.Read);
+                var m_end_bitmap_wic = new WICBitmap(m_d2d_info.ImagingFacy, Width, Height, SharpDX.WIC.PixelFormat.Format32bppPBGRA, new DataRectangle(m_end_map.DataPointer, m_end_map.Pitch));
+
+                m_local_buffer.Unmap();
+                m_local_buffer.Dispose();
+
+                return m_end_bitmap_wic;
+            }
+        }
+        ~Direct2DImage()
+        {
+            Dispose(false);
+        }//ignore
+        unsafe public void Commit()
+        {
+            D2DBitmap m_copied_buffer = new D2DBitmap(m_d2d_info.View, new Size2(Width, Height), new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, AlphaMode.Premultiplied), 72, 72, BitmapOptions.CannotDraw | BitmapOptions.CpuRead));
+            m_copied_buffer.CopyFromBitmap(m_d2d_info._bufferBack);
+
+            var m_copied_map = m_copied_buffer.Map(MapOptions.Read);
+
+            buffer.Lock();
+
+            for (int i = 0; i < m_copied_buffer.PixelSize.Height; i++)
+            {
+                int* source_base = (int*)(m_copied_map.DataPointer + i * m_copied_map.Pitch);
+                int* target_base = (int*)(buffer.BackBuffer + i * buffer.BackBufferStride);
+
+                RtlMoveMemory((void*)target_base, (void*)source_base, 4 * m_copied_buffer.PixelSize.Width);
+            }
+
+            buffer.AddDirtyRect(new Int32Rect(0, 0, Width, Height));
+            buffer.Unlock();
+
+            m_copied_buffer.Unmap();
+            m_copied_buffer.Dispose();
+        }//把后台数据呈现到前台
+
     }
 }
